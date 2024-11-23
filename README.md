@@ -1,10 +1,26 @@
 ## Experimental Plan for Enhancing Large Model Performance Using Evidence Generation
 
+### TODO:
+
++ [X] 1=Download Qwen 1.5B/7B, manage inferences
++ [ ] 2=Test the Qwen 7B with MedQA (with GT), record the initial and improved performance
++ [ ] 3=Finetune the SLM, MLP-head-1-PRE
+
+### STAT:
+
+|               | Qwen 1.5B | Qwen 7B | Phi 3 |
+| ------------- | --------- | ------- | ----- |
+| acc/MedQA:100 |           |         |       |
+
 ### 1. Define the Models, Dataset, and Scoring Criteria
 
-- **Small Model**: Qwen 1.5B, used for evidence generation.
+- **Small Model**:
+  - Qwen 1.5B, used for evidence generation.
+  - Also try MedLLM `themanas021/phi-3-medical-instruct-themanas.`
 - **Large Model**: Qwen 7B, used for final task execution.
-- **Dataset**: Domain-specific knowledge dataset (e.g., medical, legal, financial) where the large model shows poor performance.
+- **Dataset**:
+  - Domain-specific knowledge dataset where the large model shows poor performance.
+  - MedQA: https://huggingface.co/datasets/qiaojin/PubMedQA/viewer/pqa_artificial
 - **Scoring Metric**: Assign a score to the generated evidence based on the improvement in large model performance:
   - The improvement score is determined by the change in performance metrics (e.g., Accuracy/F1 Score).
   - Optionally, the score can be adjusted based on evidence length, content coverage, and actual contribution.
