@@ -1,12 +1,12 @@
-## Experimental Plan for Enhancing Large Model Performance Using Evidence Generation
+# Experimental Plan for Enhancing Large Model Performance Using Evidence Generation
 
-### TODO:
+## TODO:
 
 + [X] 1=Download Qwen 1.5B/7B, manage inferences
-+ [ ] 2=Test the Qwen 7B with MedQA (with GT), record the initial and improved performance
++ [X] 2=Test the Qwen 7B with MedQA (with GT), record the initial and improved performance
 + [ ] 3=Finetune the SLM, MLP-head-1-PRE
 
-### STAT:
+## STAT
 
 |               | Qwen 1.5B | Qwen 7B | Phi 3 |
 | ------------- | --------- | ------- | ----- |
