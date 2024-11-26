@@ -5,6 +5,7 @@ import argparse
 import json
 from tqdm import tqdm
 from datasets import load_dataset
+from datetime import datetime
 import torch
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -22,7 +23,7 @@ class HuggingFaceModel:
         # Load model with device_map="auto"
         self.model = AutoModelForCausalLM.from_pretrained(model_name, device_map="auto")
 
-    def generate(self, prompt, max_new_tokens=50, do_sample=False):
+    def generate(self, prompt, max_new_tokens=200, do_sample=False):
         # Tokenize input and move tensors to device
         inputs = self.tokenizer(prompt, return_tensors="pt", padding=True).to(self.device)
         with torch.no_grad():
@@ -31,45 +32,57 @@ class HuggingFaceModel:
             )
         return self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
 
-    def extract_answer(self, generated_text, options=["yes", "no"]):
-        # Extract answers from generated text
-        for option in options:
-            if option in generated_text:
-                return option
+    def extract_answer(self, generated_text, options=["A", "B", "C", "D"]):
+        pattern = r"The correct answer is\s*([A-D])"
+        match = re.search(pattern, generated_text)
+        
+        if match:
+            option = match.group(1)  # 提取括号内的匹配结果
+            #print(f"The extracted answer is: {option}")
+        else:
+            print("No match found.")
+
+        if option in generated_text:
+            return option
         return "Unknown"
 
 
-def load_medqa_data(split="test", num_examples=100):
-    print(f"Loading MedQA dataset ({split} split)...")
-    dataset = load_dataset("qiaojin/PubMedQA", "pqa_artificial", split=split).select(range(num_examples))
-    return dataset
+def load_data(dataset="openlifescienceai/medmcqa", split="train", num_examples=100):
+    if dataset == "openlifescienceai/medmcqa":
+        return _load_medmcqa_data(split, num_examples) 
+    elif dataset == "qiaojin/PubMedQA":
+        return _load_medqa_data(split, num_examples)
+    else:
+        raise ValueError("This dataset is not available.")
+    
+    
+def _load_medqa_data(split="train", num_examples=100):
+        print(f"Loading MedQA dataset ({split} split)...")
+        dataset = load_dataset("qiaojin/PubMedQA", "pqa_artificial", split=split).select(range(num_examples))
+        return dataset
+
+def _load_medmcqa_data(split="train", num_examples=100):
+        print(f"Loading MedMCQA dataset ({split} split)...")
+        dataset = load_dataset("openlifescienceai/medmcqa", split=split).select(range(num_examples))
+        return dataset
 
 
 def preprocess_dataset(dataset):
     # Preprocess dataset for evaluation
     processed = []
+    num_to_letter = {0: 'A', 1: 'B', 2: 'C', 3: 'D'}
     for item in dataset:
         processed.append({
-            "pubid": item["pubid"],
-            "question": item["question"],
-            "context": " ".join(item["context"]["contexts"]),  # Combine context texts
-            "long_answer": item["long_answer"],
-            "final_decision": item["final_decision"]
+            "id": item["id"] if item["id"] is not None else "Unknown ID",
+            "question": item["question"] if item["question"] is not None else "No question provided",
+            "choice_a": "A. " + (item["opa"] if item["opa"] is not None else "No option provided"),
+            "choice_b": "B. " + (item["opb"] if item["opb"] is not None else "No option provided"),
+            "choice_c": "C. " + (item["opc"] if item["opc"] is not None else "No option provided"),
+            "choice_d": "D. " + (item["opd"] if item["opd"] is not None else "No option provided"),
+            "context": item["exp"] if item["exp"] is not None else "e",  # Use empty string if evidence is None
+            "ref_ans": num_to_letter[item["cop"]] if item["cop"] is not None else "Unknown",
         })
     return processed
-
-
-def clean_pubid(pubid):
-    # Clean or process pubid for compatibility
-    if isinstance(pubid, torch.Tensor):
-        if pubid.numel() == 1:  # Single element Tensor
-            return int(pubid.item())
-        else:  # Multiple elements Tensor
-            return [int(x) for x in pubid.tolist()]
-    elif isinstance(pubid, str):
-        return pubid.replace(",", "")
-    else:
-        return pubid
 
 
 def main(args):
@@ -90,23 +103,30 @@ def main(args):
     # Prompt template
     if use_context:
         prompt_template = """
-        You are a medical assistant. Think step by step, and answer the following question with yes or no:
-        Context: {}
-        Question: {}
-        Answer:
-        """
+You are a medical assistant.
+Context: {}
+Question: {}
+Choice: 
+{}
+Think about the question step by step, then answer it with one of the choices
+Answer: The correct answer is
+"""
+
     else:
         prompt_template = """
-        You are a medical assistant. Think step by step, and answer the following question with yes or no:
-        Question: {}
-        Answer:
-        """
+You are a medical assistant.
+Question: {}
+Choice: 
+{}
+Think about the question step by step, then answer it with one of the choices
+Answer: The correct answer is
+"""
 
     # Initialize language model
     lm = HuggingFaceModel(model_name, device=device)
 
     # Load and preprocess dataset
-    dataset = load_medqa_data(split=split, num_examples=num_examples)
+    dataset = load_data(split=split, num_examples=num_examples)
     dataset_ = preprocess_dataset(dataset)
     dataloader = DataLoader(dataset_, batch_size=batch_size, shuffle=False)
 
@@ -120,74 +140,96 @@ def main(args):
 
     # Process dataset
     for batch in tqdm(dataloader, desc="Processing Batches"):
-        idx = batch["pubid"]
-        questions = batch["question"]
-        contexts = batch["context"] if use_context else [None] * len(batch["question"])
-        answers = batch["final_decision"]
+        # 确保 batch 是字典格式
+        idx = batch['id']
+        questions = batch['question']
+        contexts = batch['context'] if use_context else [None] * len(batch['question'])
+        ref_answers = batch['ref_ans']
+
+        # 构造选项列表
+        choices_list = [
+            f"{batch['choice_a'][i]}\n{batch['choice_b'][i]}\n{batch['choice_c'][i]}\n{batch['choice_d'][i]}" 
+            for i in range(len(batch['question']))
+        ]
 
         # Build prompts
         if use_context:
-            prompts = [prompt_template.format(context, question) for context, question in zip(contexts, questions)]
+            prompts = [
+                prompt_template.format(context, question, choices)
+                for context, question, choices in zip(contexts, questions, choices_list)
+            ]
         else:
-            prompts = [prompt_template.format(question) for question in questions]
+            prompts = [
+                prompt_template.format(question, choices)
+                for question, choices in zip(questions, choices_list)
+            ]
 
         # Generate model responses
         generated_texts = lm.generate(prompts)
 
         # Evaluate results
-        for i, (generated_text, question, context, reference_answer) in enumerate(
-            zip(generated_texts, questions, contexts, answers)
+        for i, (generated_text, question, context, ref_answer, prompt) in enumerate(
+            zip(generated_texts, questions, contexts, ref_answers, prompts)
         ):
             try:
-                generated_answer = lm.extract_answer(generated_text, options=["yes", "no"])
+                generated_answer = lm.extract_answer(generated_text)
             except Exception as e:
                 print(f"[Error] Failed to extract answer for question {question_counter}: {e}")
                 generated_answer = "Unknown"
 
             question_counter += 1
-            is_correct = generated_answer == reference_answer
+
+            # Check if the answer is correct
+            is_correct = generated_answer == ref_answer
             if is_correct:
                 correct_answers += 1
 
-            # Update F1 components
-            if reference_answer == "yes":
-                if generated_answer == "yes":
-                    tp += 1
-                elif generated_answer == "no":
-                    fn += 1
-            elif reference_answer == "no" and generated_answer == "yes":
+            # Update TP, FP, FN for metrics calculation
+            if generated_answer == ref_answer:
+                tp += 1
+            elif generated_answer != "Unknown" and generated_answer != ref_answer:
                 fp += 1
+            elif generated_answer == "Unknown" or generated_answer != ref_answer:
+                fn += 1
 
             # Save result
             results.append({
-                "index": clean_pubid(idx),
-                "question": question,
-                "context": context,
+                "index": idx,
+                "prompt": prompt,
                 "generated_answer": generated_answer,
-                "reference_answer": reference_answer,
+                "reference_answer": ref_answer,
                 "is_correct": is_correct
             })
+            
+            if question_counter % 5 == 0:
+                print("\n--- Debug Info ---")
+                print(f"Prompt: {prompt}")
+                print(f"Generated Output: {generated_text}")
+                print(f"Extracted Answer: {generated_answer}")
+                print(f"Reference Answer: {ref_answer}")
+                print("------------------\n")
 
         # Clear memory
         gc.collect()
         torch.cuda.empty_cache()
 
     # Calculate metrics
-    accuracy = correct_answers / len(dataset) * 100
+    accuracy = correct_answers / len(dataset) 
     precision = tp / (tp + fp) if tp + fp > 0 else 0
     recall = tp / (tp + fn) if tp + fn > 0 else 0
     f1_score = 2 * precision * recall / (precision + recall) if precision + recall > 0 else 0
 
     # Print metrics
-    print(f"\nAccuracy: {accuracy:.2f}%")
+    print(f"\nAccuracy: {accuracy:.2f}")
     print(f"Precision: {precision:.4f}")
     print(f"Recall: {recall:.4f}")
     print(f"F1-score: {f1_score:.4f}")
 
     # Save results
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     os.makedirs(args.root, exist_ok=True)
     output_filename = os.path.join(
-        args.root, f"results_{model_name.replace('/', '_')}_{num_examples}_{split}_use_context_{use_context}.json"
+        args.root, f"results_{model_name.replace('/', '_')}_{num_examples}_{split}_use_context_{use_context}_{timestamp}.json"
     )
     with open(output_filename, "w") as f:
         json.dump(results, f, indent=4)
@@ -201,7 +243,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_name", type=str, default="themanas021/phi-3-medical-instruct-themanas")
     parser.add_argument("--split", type=str, default="train")
     parser.add_argument("--root", type=str, default="./logs")
-    parser.add_argument("--use_context", type=lambda x: x.lower() in ["true", "1", "yes"], default="true")
+    parser.add_argument("--use_context", type=lambda x: x.lower() in ["true", "1", "yes"], default="1")
     args = parser.parse_args()
 
     main(args)

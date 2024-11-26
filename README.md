@@ -3,14 +3,17 @@
 ## TODO:
 
 + [X] 1=Download Qwen 1.5B/7B, manage inferences
-+ [X] 2=Test the Qwen 7B with MedQA (with GT), record the initial and improved performance
++ [X] 1'=Also try `themanas021/phi-3-medical-instruct-themanas`, not work for garbage in-context ability
++ [X] ~~2=Test the Qwen 7B with MedQA (with GT), record the initial and improved performance~~
++ [X] 2'=Try MedMCQA instead
 + [ ] 3=Finetune the SLM, MLP-head-1-PRE
 
 ## STAT
 
-|               | Qwen 1.5B | Qwen 7B | Phi 3 |
-| ------------- | --------- | ------- | ----- |
-| acc/MedQA:100 |           |         |       |
+|                 | Qwen 1.5B | Qwen 7B | Phi 3 |
+| --------------- | --------- | ------- | ----- |
+| ACC w/ context | 0.79      | 0.83    |       |
+| ACC w/o context | 0.45      | 0.51    |       |
 
 ### 1. Define the Models, Dataset, and Scoring Criteria
 
